@@ -5,9 +5,12 @@ from typing import Any, Dict, Optional
 import time
 import httpx
 import base64
+import os
 from config import settings
 
 app = FastAPI()
+
+DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 
 # -------------------------
 # Pydantic models (kept for reference but endpoint will accept raw JSON)
@@ -79,6 +82,7 @@ async def get_pingone_token() -> str:
     if not all([token_url, client_id, client_secret]):
         raise RuntimeError("Missing PingOne credentials in config or environment variables")
 
+    # client_secret_basic
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -88,8 +92,23 @@ async def get_pingone_token() -> str:
         "grant_type": "client_credentials",
     }
 
+    if DEBUG:
+        print("[DEBUG] Requesting token:")
+        print({
+            "token_url": token_url,
+            "auth_method": "client_secret_basic",
+            "has_env_id": bool(settings.PINGONE_ENV_ID),
+            "auth_base": settings.PINGONE_AUTH_BASE,
+        })
+
     async with httpx.AsyncClient() as client:
         resp = await client.post(token_url, data=data, headers=headers, timeout=30)
+        if DEBUG:
+            print("[DEBUG] Token response status:", resp.status_code)
+            try:
+                print("[DEBUG] Token response body:", resp.json())
+            except Exception:
+                print("[DEBUG] Token response text:", resp.text)
         resp.raise_for_status()
         payload = resp.json()
         token = payload.get("access_token")
@@ -123,12 +142,20 @@ async def authorize_decision(request: Request):
     except Exception:
         return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
-    evaluate_url = f"{settings.PINGONE_API_BASE}/environments/{settings.PINGONE_ENV_ID}/decisionEndpoints/{decision_endpoint_id}/evaluate"
+    # Post directly to the decision endpoint (no trailing /evaluate)
+    evaluate_url = f"{settings.PINGONE_API_BASE}/environments/{settings.PINGONE_ENV_ID}/decisionEndpoints/{decision_endpoint_id}"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+
+    if DEBUG:
+        print("[DEBUG] Forwarding evaluate request:")
+        print({
+            "evaluate_url": evaluate_url,
+            "has_token": bool(token),
+        })
 
     try:
         async with httpx.AsyncClient() as client:
@@ -153,3 +180,24 @@ async def authorize_decision(request: Request):
         }, status_code=502)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+# -------------------------
+# Debug endpoint (no secrets revealed)
+# -------------------------
+
+@app.get("/_debug")
+async def debug_info():
+    token_url = settings.PINGONE_TOKEN_URL or (
+        f"{settings.PINGONE_AUTH_BASE.rstrip('/')}/{settings.PINGONE_ENV_ID}/as/token" if settings.PINGONE_ENV_ID else None
+    )
+    return JSONResponse({
+        "auth_method": "client_secret_basic",
+        "has_client_id": bool(settings.PINGONE_CLIENT_ID),
+        "has_client_secret": bool(settings.PINGONE_CLIENT_SECRET),
+        "env_id": settings.PINGONE_ENV_ID,
+        "decision_endpoint_id": settings.PINGONE_DECISION_ENDPOINT_ID or settings.PINGONE_DECISION_ID,
+        "auth_base": settings.PINGONE_AUTH_BASE,
+        "token_url": token_url,
+        "api_base": settings.PINGONE_API_BASE,
+        "debug": DEBUG,
+    })
