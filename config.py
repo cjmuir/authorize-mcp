@@ -15,8 +15,9 @@ class Settings:
     PINGONE_DECISION_ID: Optional[str] = None  # Back-compat
     PINGONE_DECISION_ENDPOINT_ID: Optional[str] = None  # Preferred
 
-    # Token URL typically does not change except for regional differences
-    PINGONE_TOKEN_URL: str = "https://auth.pingone.com/as/token"
+    # Auth base and token URL (if TOKEN_URL not provided, build from AUTH_BASE and ENV_ID)
+    PINGONE_AUTH_BASE: str = "https://auth.pingone.com"
+    PINGONE_TOKEN_URL: Optional[str] = None
 
     # API base for management/authorize calls (adjust TLD for your region)
     PINGONE_API_BASE: str = "https://api.pingone.com/v1"
@@ -32,6 +33,7 @@ class Settings:
         clone.PINGONE_DECISION_ID = os.getenv("PINGONE_DECISION_ID", self.PINGONE_DECISION_ID)
         if not clone.PINGONE_DECISION_ENDPOINT_ID and clone.PINGONE_DECISION_ID:
             clone.PINGONE_DECISION_ENDPOINT_ID = clone.PINGONE_DECISION_ID
+        clone.PINGONE_AUTH_BASE = os.getenv("PINGONE_AUTH_BASE", self.PINGONE_AUTH_BASE)
         clone.PINGONE_TOKEN_URL = os.getenv("PINGONE_TOKEN_URL", self.PINGONE_TOKEN_URL)
         clone.PINGONE_API_BASE = os.getenv("PINGONE_API_BASE", self.PINGONE_API_BASE)
         return clone

@@ -10,11 +10,10 @@ from config import settings
 app = FastAPI()
 
 # -------------------------
-# Pydantic models
+# Pydantic models (kept for reference but endpoint will accept raw JSON)
 # -------------------------
 
 class DecisionSubject(BaseModel):
-    # Flexible shape; you can refine according to your policy design
     id: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
 
@@ -35,11 +34,9 @@ class DecisionRequest(BaseModel):
     action: Optional[DecisionAction] = None
     resource: Optional[DecisionResource] = None
     environment: Optional[DecisionEnvironment] = None
-    # If your policy expects additional facts, include them as a catch-all
     context: Optional[Dict[str, Any]] = None
 
 class DecisionResponse(BaseModel):
-    # This mirrors common PingOne evaluation fields; unknown fields are allowed
     decision: Optional[str] = None
     obligations: Optional[Any] = None
     advice: Optional[Any] = None
@@ -67,16 +64,21 @@ async def get_pingone_token() -> str:
     global _cached_token, _token_expires_at
 
     now = time.time()
-    if _cached_token and now < _token_expires_at - 30:  # 30s safety buffer
+    if _cached_token and now < _token_expires_at - 30:
         return _cached_token
 
+    # Build token URL: prefer explicit PINGONE_TOKEN_URL, otherwise AUTH_BASE + ENV_ID
     token_url = settings.PINGONE_TOKEN_URL
+    if not token_url:
+        if not settings.PINGONE_ENV_ID:
+            raise RuntimeError("PINGONE_ENV_ID is required to build the token URL")
+        token_url = f"{settings.PINGONE_AUTH_BASE.rstrip('/')}/{settings.PINGONE_ENV_ID}/as/token"
+
     client_id = settings.PINGONE_CLIENT_ID
     client_secret = settings.PINGONE_CLIENT_SECRET
     if not all([token_url, client_id, client_secret]):
         raise RuntimeError("Missing PingOne credentials in config or environment variables")
 
-    # client_secret_basic: send Basic auth header, only grant_type in body
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -104,7 +106,7 @@ async def get_pingone_token() -> str:
 # -------------------------
 
 @app.post("/api/authorize-decision")
-async def authorize_decision(body: DecisionRequest):
+async def authorize_decision(request: Request):
     decision_endpoint_id = settings.PINGONE_DECISION_ENDPOINT_ID or settings.PINGONE_DECISION_ID
     if not settings.PINGONE_ENV_ID or not decision_endpoint_id:
         return JSONResponse({
@@ -116,6 +118,11 @@ async def authorize_decision(body: DecisionRequest):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+    try:
+        body: Dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
     evaluate_url = f"{settings.PINGONE_API_BASE}/environments/{settings.PINGONE_ENV_ID}/decisionEndpoints/{decision_endpoint_id}/evaluate"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -125,8 +132,7 @@ async def authorize_decision(body: DecisionRequest):
 
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(evaluate_url, json=body.dict(exclude_none=True), headers=headers, timeout=30)
-        # If PingOne returned non-JSON on error, guard parsing
+            resp = await client.post(evaluate_url, json=body, headers=headers, timeout=30)
         try:
             payload = resp.json()
         except ValueError:
@@ -136,7 +142,6 @@ async def authorize_decision(body: DecisionRequest):
                 "text": resp.text,
             }, status_code=502)
 
-        # Return validated response
         decision = DecisionResponse.from_pingone(payload)
         return JSONResponse(content=decision.dict(), status_code=resp.status_code)
 
