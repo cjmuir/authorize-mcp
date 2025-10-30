@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 import time
 import httpx
+import base64
 from config import settings
 
 app = FastAPI()
@@ -75,12 +76,15 @@ async def get_pingone_token() -> str:
     if not all([token_url, client_id, client_secret]):
         raise RuntimeError("Missing PingOne credentials in config or environment variables")
 
+    # client_secret_basic: send Basic auth header, only grant_type in body
+    basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": f"Basic {basic}",
+    }
     data = {
         "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
     }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(token_url, data=data, headers=headers, timeout=30)
