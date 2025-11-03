@@ -52,3 +52,92 @@ A minimal FastAPI server for forwarding agent decision requests to PingOne Autho
 For details, see PingOne docs: Evaluate a Decision Request
 (https://apidocs.pingidentity.com/pingone/authorize/v1/api/#post-evaluate-a-decision-request)
 
+## MCP Protocol Integration
+
+This server implements the Model Context Protocol (MCP) for automatic agent tool discovery.
+
+### MCP Endpoint
+- **URL**: `https://authorize-mcp.onrender.com/mcp`
+- **Protocol**: JSON-RPC 2.0 over HTTP
+
+### Available MCP Methods
+
+1. **`initialize`** - Initialize MCP connection
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "initialize",
+     "params": {}
+   }
+   ```
+
+2. **`tools/list`** - List available tools
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 2,
+     "method": "tools/list",
+     "params": {}
+   }
+   ```
+
+3. **`tools/call`** - Execute a tool
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "method": "tools/call",
+     "params": {
+       "name": "evaluate_authorization_decision",
+       "arguments": {
+         "user_id": "189d1ef5-676d-493f-b65a-39586024083e",
+         "policy_request": "payment",
+         "parameters": {
+           "Request - Payment.paymentAmount": "3000",
+           "Request - Payment.creditorName": "Customer2987",
+           "Request - Payment.consentId": "test-consent"
+         }
+       }
+     }
+   }
+   ```
+
+### Tool: `evaluate_authorization_decision`
+
+Evaluates authorization decisions using PingOne Authorize Policy Decision service.
+
+**Arguments:**
+- `user_id` (required): PingOne user ID
+- `policy_request` (optional): Type of request (default: "payment")
+- `parameters` (optional): Policy-specific parameters object
+
+**Example Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Authorization Decision: PERMIT\n✓ The request is authorized.\n\nFull response: {...}"
+      }
+    ],
+    "isError": false
+  }
+}
+```
+
+### Agent Integration
+For AI agents integrating with this MCP server:
+- Connect to `/mcp` endpoint using JSON-RPC 2.0
+- Call `initialize` first
+- Use `tools/list` to discover the `evaluate_authorization_decision` tool
+- Call `tools/call` with appropriate arguments
+
+See `AGENT_PROMPT.md` for detailed instructions on constructing requests from natural language queries.
+
+### Legacy HTTP API
+The `/api/authorize-decision` endpoint remains available for backward compatibility.
+
